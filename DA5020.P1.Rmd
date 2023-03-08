@@ -1,0 +1,325 @@
+---
+
+author: " Dushyanth Gopichand"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+---
+```{r}
+library(XML)
+library(RCurl)
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+```
+
+1.Load the data, directly from the URL, into your R environment.
+```{r}
+NYdata <- read.csv("https://data.ny.gov/api/views/ngbt-9rwf/rows.csv", header = TRUE)
+```
+
+2.Evaluate the dataset to determine what data preparation steps are needed and perform them. At a minimum, ensure that you discuss the distribution of the data, outliers and prepare any helpful summary statistics to support your analysis.
+```{r}
+# Dimensions
+dim(NYdata) #The dataset has 7 Columns and 86374 rows 
+
+str(NYdata) # There are major categorical data in the set. All columns (County.of.Program.Location, Program.Category, Service.Type Age.Group, Primary.substance.Group) except Admissions is categorical. Admissions is a continuous variable
+
+summary(NYdata)
+View(NYdata)
+
+# Missing Values
+na <- table(is.na(NYdata)) #No null values in the data set 
+
+#Finding counts
+
+#1) 
+ggplot(data= NYdata, aes(x= reorder(Program.Category,-Admissions), y= Admissions)) +
+  geom_histogram(stat= "identity") +
+  labs(title= "Admissions according to Program Category",
+       caption = "Chart to visualize no of admissions for each program category") +
+  theme(plot.title = element_text(color = "red", size = 12, face = "bold"), plot.caption = element_text(color = "green", size= 12, face = "italic")) +
+  xlab("Program Category") + ylab("No of admissions") #Maximum admissions are for Outpatient and minimum for Specialized cases
+
+#2)
+ggplot(data= NYdata, aes(x= reorder(Age.Group,-Admissions), y= Admissions)) +
+  geom_bar(stat= "identity") +
+   labs(title= "Admissions according to Age Group",
+       caption = "Chart to visualize no of admissions for each age group") +
+  theme(plot.title = element_text(color = "red", size = 12, face = "bold"), plot.caption = element_text(color = "green", size= 12, face = "italic")) +
+  xlab("Age group") + ylab("No of admissions") #Maximum admissions are for age group 25 thru 34 and minimum for under 18
+
+#3)
+ggplot(data= NYdata, aes(x= reorder(Primary.Substance.Group,-Admissions), y= Admissions)) +
+  geom_histogram(stat= "identity") +
+   theme(axis.text.x = element_text(angle= 90, hjust=0))+
+  labs(title= "Admissions according to Primary Substance Group",
+       caption = "Chart to visualize no of admissions for each Primary Substance Group") +
+  theme(plot.title = element_text(color = "red", size = 12, face = "bold"), plot.caption = element_text(color = "green", size= 12, face = "italic")) +
+  xlab("Primary Substance Group") + ylab("No of admissions") #Maximum admissions are for Alcohol and minimum for others
+
+#This might mean that ages 25 through 34 consume alcohol and do outpatient visits. 
+
+# Outliers for no. of Admissions using box plot
+ggplot(NYdata) +
+  aes(x = "", y = Admissions) +
+  geom_boxplot(fill = "#0c4c8a") +
+  theme_minimal()+
+  labs(title= "Outliers for number of admissions",
+       caption = "Chart to visualize outliers for no of admissions") +
+  theme(plot.title = element_text(color = "red", size = 12, face = "bold"), plot.caption = element_text(color = "green", size= 12, face = "italic")) +
+  xlab("Data distribution") + ylab("No of admissions")
+
+#Outliers using which()
+
+#Calculate mean, sd and z score
+mean_df <- mean(NYdata$Admissions)
+sd_df <- sd (NYdata$Admissions)
+z_df <- abs((mean_df- NYdata$Admissions)/ sd_df)
+
+#Outliers are 3 z- scores away from either side of the mean
+outliers <- NYdata[which(z_df >3),]
+View(outliers)
+summary(outliers)
+```
+
+**Explanation**
+There are 1680 outliers in the set that are 3 SD away from mean. The minimum no. of admissions in outlier data is  427 (for other opioids, alcohol and marijuana) while the maximum is 2862 for Alcohol. We do not need to remove them as although these are outliers, they can be proof of actual number of admissions too.
+
+
+3.(30 pts) Structure the data relationally, at a minimum, you should have four tibbles or data frames as follows:  •county which contains the name of all counties and their respective county code (which is the primary key). 
+```{r}
+# 1. County tibble
+Countydf <- NYdata %>%
+  distinct(County.of.Program.Location) %>% # To select distinct County names from the data set.
+  mutate(County_code = c("AL","AG","BR","BM","CA","CY","CH","CM","CN","CL","CO","CR","DE","DU","ER","ES",
+                  "FR","FU","GE","GR","HE","JE","KI","LE","LI","MA","MO","MG","NA","NY","NI",
+                  "ON","OD","OT","OR","OL","OS","OG","PU","QU","RE","RM","RO","SL","SA","SC","SH",
+                  "SY","SE","ST","SU","SV","TI","TO","UL","WR","WS","WA","WE","WY","YA")) %>%#Adding county codes. Since NY was the code for 5 counties, we have changed codes for 4 counties
+  select(County_code, County.of.Program.Location) # To add county_code as the first column
+
+county <- as_tibble(Countydf) # Converting data frame to a tibble
+
+#  Code to check primary key
+county %>% 
+  count(County_code) %>%
+  filter(n > 1)
+
+```
+
+```{r}
+# 2. program_category tibble
+Program_categorydf <- NYdata %>%
+  distinct(Program.Category) %>% # To select distinct Program category from the data set.
+  mutate(Program_code= c("CR", "IP", "OTP", "OP", "RE", "SP")) %>% # To add Program codes
+  select(Program_code,Program.Category) # To add program code as the first column
+
+Program_category <- as_tibble(Program_categorydf) # Converting data frame to a tibble
+#  Code to check primary key
+Program_category %>%
+  count(Program_code) %>%
+  filter(n>1)
+```
+```{r}
+# 3. primary_substance_group tibble
+Primary_substance_groupdf <- NYdata %>% 
+  distinct(Primary.Substance.Group) %>% # To select distinct Substance group from the data set.
+  mutate(Substance_code = c("H","A","OO","AO","C","M","N")) %>% # To add substance codes. 
+  select(Substance_code,Primary.Substance.Group) # To add substance code as the first column
+
+Primary_substance_group <- as_tibble(Primary_substance_groupdf) # Converting data frame to a tibble
+#  Code to check primary key
+Primary_substance_group %>%
+  count(Substance_code) %>%
+  filter(n>1)
+```
+
+```{r}
+# 4. admissions_data tibble
+Admissions_datadf <- NYdata %>%
+  left_join(county, by = "County.of.Program.Location") %>% # To Join the county tibble
+  left_join(Program_category, by = "Program.Category") %>% # To Join Program category tibble
+  left_join(Primary_substance_group, by = "Primary.Substance.Group") %>% # To Join Primary substance group tibble
+  # Renaming the Code columns of 3 tibbles to resemble the original data frame
+  rename("County_of_Program_Location" = County_code,
+         "Program_Category" = Program_code,
+         "Primary_Substance_Group" = Substance_code) %>%
+  # Selecting all the columns excluding data in the county, program_category and primary substance group tibbles.
+  select(Year,County_of_Program_Location,Program_Category,Service.Type,Age.Group,Primary_Substance_Group,Admissions)
+# Converting data frame to a tibble
+Admissions_data <- as_tibble(Admissions_datadf)   
+
+```
+
+4.(15 pts) Create a function called annualAdmissions() that derives the total number of reported admissions that transpired each year, for the entire state of NY and displays the results using a line chart. Annotate the chart to show the year with the highest number of admissions. Note: the year should be on the x-axis and the number of admissions on the y-axis. Explain the chart. 
+```{r}
+annualAdmission <- function(ad)
+  #Creating a function called annualAdmission 
+  {
+  totadmin <- ad %>% 
+    mutate(ad_year = format(ad$Year)) %>%
+    group_by(ad_year) %>%
+    summarise( ad_mission = sum(Admissions))
+    print(totadmin)
+  max_ad <- totadmin %>% slice_max(ad_mission)
+  #Plotting number of admission each year for the state of New York
+  ggplot(totadmin, aes(x=ad_year,y=ad_mission, group=1)) + geom_line(colour = '#CC0033') + geom_vline(xintercept = max_ad$ad_year, color = 'blue') + labs(title= "Total number of Admissions in the state of New York from 2007 to 2019", x = "Years", y = "Number of Admissions", caption= "Chart to show the year with the highest number of admissions")+
+    theme(
+  plot.title = element_text(color = "red", size = 12, face = "bold"),
+  plot.caption = element_text(color = "green", size= 12, face = "italic")
+) 
+}
+annualAdmission(NYdata)
+```
+
+
+**Explanation**
+The above graph depicts the number of Rehab admissions in the state of New York from the year 2007 to 2019. We can observe from the graph,that the number of admissions increased from 2007 to 2009. The year 2009 saw the highest admission to the Rehab facility, around 311717 patients were admitted on that year. We can see a negative slope from 2009 all the way to 2019, which implies that the admissions to Rehab facility gradually reduced over a decade. The Rehab facility saw lowest admission in the year 2019, around 267864 patients were admitted, that is 15% less than that of 2009. We can conclude that over the past ten years the Rehab facility is treating fewer patients each subsequent year in the state of New York.
+
+5. (10 pts) Analyze the percentage of admissions for each county and visualize the results for the top 10 counties using a bar chart. Explain the results. Note: ensure that you join any related dataframes/tibbles. 
+```{r}
+proportion <- NYdata %>%
+  group_by (County.of.Program.Location)%>%
+  summarize (Total= sum(Admissions)) %>%
+  mutate(Proportion = Total/sum(Total)*100) %>%
+  arrange(desc(Proportion))
+View(proportion)
+#Comment: The maximum proportion of cases are in New York accounting for 14.87% (561853) while the minimum proportion is in Lewis accounting for 0.02% (867)
+
+#To find top 10
+top10 <- proportion %>% head(10)
+top10
+ggplot(data= top10, aes(x= reorder(County.of.Program.Location, -Proportion), y= Proportion, fill= County.of.Program.Location)) +
+  geom_bar(stat= "identity") +
+   theme(axis.text.x = element_text(angle= 90, hjust=0))+
+   labs(title= "Top 10 counties",
+        subtitle= "No. of Admissions data",
+        caption = "Bar chart to visulaize the no of admissions",
+        fill= "Counties of New York") + 
+  theme(
+  plot.title = element_text(color = "red", size = 12, face = "bold"),
+  plot.subtitle = element_text(color = "blue"),
+  plot.caption = element_text(color = "green", size= 12, face = "italic")
+) +
+  xlab("County names") + ylab("Proportion (%)")
+```
+
+
+**Explanation**
+Among the top 10 counties, New York has maximum cases, 14.87% (561853) as seen earlier from the total data and the 10th county among the top 10 is Onondaga with only 3.57% (135118) admissions
+
+
+6.(15 pts) Filter the data, using a regular expression, and extract all admissions to the various “Rehab” facilities; i.e. your regex should match all facilities that include the word rehab, rehabilitation, etc. Using the filtered data, identify which substance is the most prominent among each age group. Visualize and explain the results. 
+
+```{r}
+# Filter the data, using a regular expression
+Rehab <- Admissions_data %>%
+  filter(str_detect(Service.Type, "Rehab")) # Using str_detect to select elements matching the patter "Rehab"
+# To check that all the service facilities contain the word Rehab
+Rehab %>%
+  distinct(Service.Type)
+
+# To check the count of the substance group according to the service facilities in different Age groups.
+Rehab %>%
+  count(Primary_Substance_Group,Age.Group)
+
+# Visualizing the data using a bar chart
+Rehab %>%
+  rename("Substance_code" = "Primary_Substance_Group") %>% # Renaming the substance code to join the tibble
+  left_join(Primary_substance_group, by = "Substance_code") %>% # Joining substance group tibble to get names of the prominent substance
+  ggplot(aes(x = Primary.Substance.Group)) +
+  geom_bar(aes(fill = Age.Group)) + # to filter data of different services
+  facet_wrap(~Age.Group,nrow = 2) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  geom_text(stat = "count", aes(label = ..count..),vjust = 0.5,size = 3.5) +
+  # Naming the x and y axes, title, caption and legend
+  labs(x = "Substance Group", y = "Admission", title = "Prominent substance in different age groups",  
+       caption = "Prominent substances in different groups of people along with Rehab services",
+       fill = "Age Group") +
+  theme(
+  plot.title = element_text(color = "red", size = 12, face = "bold"),
+  plot.caption = element_text(color = "green", size= 12, face = "italic")
+)
+```
+**Explanation**
+
+The above bar graph is showing results of the prominent substance group in different age groups in the New York state:
+
+1. Under 18: The prominent substance is Marijuana including Hashish(250), The least common is Cocaine including crack(133)
+
+2. Age group 18 - 24: The prominent substance is Marijuana including Hashish(863).
+
+3. Age group 25 - 34: The prominent substance is Alcohol(772).
+
+3. Age group 35 - 44: The prominent substance is Alcohol(776).
+
+4. Age group 45 - 54: The prominent substance is Alcohol(775).
+
+5. Age group 55 and older: The prominent substance is Alcohol(766). 
+
+To conclude, The prominent substance group in people younger than 25 years is Marijuana including Hashish. 
+And, Alcohol in people older than 24 years
+
+
+7.(20 pts) Using the “rehab” data from question 6 above, perform a detailed analysis 
+to identify any patterns or trends with respect to the admission to rehab facilities 
+in certain counties and substance groups. Explain your observations. 
+Note: ensure that you join any related dataframes/tibbles.
+
+```{r}
+# Using Rehab data from Q6 to visualize number of admissions based on County and type of Substance.
+Rehab %>%
+  rename("Substance_code" = "Primary_Substance_Group") %>%
+  left_join(Primary_substance_group, by = "Substance_code") %>%
+ggplot(aes(x = Primary.Substance.Group, y = Admissions, fill = Service.Type)) +
+  geom_bar(stat = "Identity",position = "dodge") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8)) +
+  labs(x = "Substance", y = "Number of Admissions", 
+       title = "Admission Trends based on Substance Groups",
+       caption = "Number of admissions in Rehab facilities \n based on the Primary Substance Groups.",
+       fill = "Service Provided")+
+  theme(
+  plot.title = element_text(color = "red", size = 12, face = "bold"),
+  plot.caption = element_text(color = "green", size= 12, face = "italic"))
+
+Rehab %>%
+  rename("County_code" = County_of_Program_Location) %>%
+  left_join(county, by = "County_code") %>%
+  ggplot(aes(x = County.of.Program.Location, y = Admissions, fill = Service.Type)) + 
+  geom_bar(stat = "Identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8)) +
+  labs(x = "County", y = "Number of Admissions", 
+       title = "Admission Trends based on Counties",
+       caption = "Number of admissions in Rehab \n facilities based on the counties",
+       fill = "Service Provided") + theme(
+  plot.title = element_text(color = "red", size = 12, face = "bold"),
+  plot.caption = element_text(color = "green", size= 12, face = "italic"))
+```
+
+
+**Explanation**
+The first graph display the number of admission to Rehab based on the Substance. It is clear from the graph that most of the in-house patients admitted to Rehab are under Heroin more than 850, followed by Alcohol at around 750 and lastly Cocaine and Opioids both at around 460. Additionally, we can infer from the graph that inpatients has the maximum highest service at a Rehab facility. Marijuana, is the only substance that has the highest residential Rehab for Youth and Special services for outpatient Rehab. It is clear from the graph that for all the substance types, Inpatient rehab seems to be very popular,expect for Marijuana where patients prefer residential rehab. Inpatient and outpatient is almost the same for marijuana, this is true for heroin, but heroin patients prefer outpatient and Stabilization rehab. 
+  
+The Second graph shows the number of admission to Rehab facility in different counties of New York state. We can see from the graph, five counties of New York state, that is, Suffolk, Westchester, New York,Putnam and Schenectady has the highest inpatient admission more than 40000 annually. Suffolk takes the first place with more than 70000 inpatient admissions annually followed by Westchester with more than 60000 inpatient admissions annually. Under outpatient services Westchester, New York, Putnam ranks highest among other counties. with Westchester being highest with a little more than 20000 and followed by New York around 20000 annual admissions. We can see from the graph that inpatient is the most popular service for most of the counties in the state of New York. Hence we can conclude that most people in the New York state prefer in-house rehabilitation service.
+
+**Summary**
+1.Firstly, we loaded the data-set on reported admissions of people in certified chemical dependence treatment programs throughout New York State (NYS) in the R environment using the function "read.csv". 
+
+2.After evaluation of the data set, we performed various Data preparation steps and made the following observations:	
+The data set has seven variables and 86374 observations. There are no missing values present. Most of the variables are categorical except the Admissions variable. There are 1680 outliers in the set that are 3 Standard Deviations away from the mean. We did not remove them as although these are outliers, they can be the proof of the number of admissions.
+
+3.Then, we structured the data by creating four different Tibbles.
+County, Program category, Primary substance group
+In these Tibbles, we created a new column of codes which are the primary keys and their respective names in the second column.
+The fourth Tibble, Admissions_data contains the details on the reported number of admissions along with the foreign keys from the above Tibbles.
+
+4.We created a function called annualAdmission, which reports the total number of admissions in the state of New York. The function also visualize a chart with admissions on y axis and years on x axis, furthermore the function also depicts the year with the highest number of admission. 
+
+5.We Analyzed the percentage of admissions for each county and visualized the results for the top 10 counties using a bar graph. Among the top 10 counties, New York has maximum cases from the total data, and the 10th county among the top 10 is Onondaga. 
+
+6.After extracting the admissions to the various Rehab facilities, we analyzed the prominent substance in different age groups. In conclusion, The most prominent substance group in people younger than 25 years is Marijuana with Hashish and, Alcohol in people older than 24 years.
+
+7.We used the 'Rehab' from Question 6 to visualize the number of admissions in the state of New York by the type of substance and by county. we plotted two graphs, one for county and another of substance group. 
+
